@@ -1,17 +1,16 @@
 -- | Defines 'Cmd', the core API of Procex.
 module Procex.Core (Cmd, makeCmd', passArg, unIOCmd, postCmd, run', runReplace, passFd, passArgFd, passNoFd) where
 
-import Control.Concurrent.Async
 import Control.Exception.Base
 import Data.ByteString.Lazy (ByteString)
-import qualified Data.ByteString.Lazy.UTF8 as B
 import Data.Foldable (toList)
-import qualified Data.Sequence as S
 import Foreign.C.Error (throwErrno)
+import Foreign.C.Types
 import Procex.Execve
-import System.Posix.ByteString
 
-data Arg = ArgStr ByteString | ArgFd Fd deriving stock (Show)
+type Fd = CInt
+
+data Arg = ArgStr ByteString | ArgFd Fd deriving (Show)
 
 data Args = Args
   { args :: [Arg]
@@ -49,7 +48,7 @@ makeCmd' path = Cmd $ \Args {args, fds, executor} -> do
   let fds_seq = sequentialize_fds fds []
   let (all_fds, args') =
         foldr
-          ( flip $ \(all_fds, args') -> \case
+          ( flip $ \(all_fds, args') -> \x -> case x of
               ArgStr str -> (all_fds, str : args')
               ArgFd old_fd -> let new_fd = S.length all_fds in (all_fds S.|> old_fd, ("/proc/self/fd/" <> B.fromString (show new_fd)) : args')
           )

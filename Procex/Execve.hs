@@ -6,8 +6,10 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as B
 import Foreign
 import Foreign.C.Types
-import System.Posix.ByteString
 import Prelude
+
+type Fd = CInt
+type Pid = CInt
 
 type ExecveRaw =
   Ptr CChar ->
@@ -15,7 +17,7 @@ type ExecveRaw =
   Ptr (Ptr CChar) ->
   Ptr Fd ->
   CSize ->
-  IO CPid
+  IO Pid
 
 -- | The signature for 'execve' and 'forkexecve'.
 type Execve =
@@ -27,9 +29,10 @@ type Execve =
   Maybe [ByteString] ->
   -- | The fds to pass. All other fds will be closed. In the new process, the integral id for each fd will be
   -- set to the position the fd has in this list, e.g. the first element in this list will be stdin, and so on.
+  -- If fds[i] is set to -1, then the ith fd will also be closed.
   [Fd] ->
   -- | The process id for the new process.
-  IO (Maybe CPid)
+  IO (Maybe Pid)
 
 foreign import ccall "vfork_close_execve" c_vfork_close_execve :: ExecveRaw
 
@@ -38,7 +41,7 @@ foreign import ccall "close_execve" c_close_execve :: ExecveRaw
 -- foreign import ccall "execve" c_execve :: Ptr CChar -> Ptr (Ptr CChar) -> Ptr (Ptr CChar) -> IO ()
 -- foreign import ccall "&environ" c_environ :: Ptr (Ptr CChar)
 
-exec' :: ExecveRaw -> ByteString -> [ByteString] -> Maybe [ByteString] -> [Fd] -> IO CPid
+exec' :: ExecveRaw -> ByteString -> [ByteString] -> Maybe [ByteString] -> [Fd] -> IO Pid
 exec' f path args env fds = do
   let go :: [BS.ByteString] -> ([Ptr CChar] -> IO a) -> IO a
       go [] f = f []
@@ -62,6 +65,5 @@ execve path args env fds = const Nothing <$> exec' c_close_execve path args env 
 forkexecve :: Execve
 forkexecve path args env fds = h <$> exec' c_vfork_close_execve path args env fds
   where
-    h :: CPid -> Maybe CPid
-    h (CPid (-1)) = Nothing
+    h (-1) = Nothing
     h x = Just x

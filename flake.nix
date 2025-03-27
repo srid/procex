@@ -1,79 +1,51 @@
 {
   description = "procex";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
+    nixpkgs-for-tests-and-lib.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
   };
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs-for-tests-and-lib }:
     let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
-      perSystem = nixpkgs.lib.genAttrs supportedSystems;
-      pkgsFor = system: nixpkgs.legacyPackages.${system};
+      nixpkgs = nixpkgs-for-tests-and-lib;
+      inherit (nixpkgs.lib) genAttrs;
+      systems = [ "x86_64-linux" "aarch64-linux" ];
       hsOverlay = hsPkgs: hsPkgs.override {
         overrides = final: prev: {
-          procex = final.callPackage ./procex.nix { hspec = final.hspec_2_10_0_1; };
+          procex = final.callPackage ./procex.nix {};
         };
       };
-      hsPkgsFor = system: hsOverlay (pkgsFor system).haskell.packages.ghc924;
-      formattersFor = system: with (pkgsFor system); [
+      formatters = genAttrs systems (system: with nixpkgs.legacyPackages.${system}; [
         nixpkgs-fmt
         haskellPackages.cabal-fmt
-        (haskell.lib.compose.overrideCabal (_: { doCheck = false; }) (hsPkgsFor system).fourmolu_0_8_0_0)
-      ];
-      regen = system: (pkgsFor system).writeShellApplication {
+        haskellPackages.fourmolu
+      ]);
+      regen = genAttrs systems (system: with nixpkgs.legacyPackages.${system}; writeShellApplication {
         name = "regen";
-        runtimeInputs = [ (pkgsFor system).cabal2nix ] ++ formattersFor system;
+        runtimeInputs = [ cabal2nix ] ++ formatters.${system};
         text = ''
           set -xe
           cabal2nix ./. > procex.nix
           ./bin/format
         '';
-      };
+      });
     in
     {
-      checks = perSystem (system: {
-        formatting = (pkgsFor system).runCommandNoCC "formatting-check"
+      checks = genAttrs systems (system: {
+        formatting = nixpkgs.legacyPackages.${system}.runCommandNoCC "formatting-check"
           {
-            nativeBuildInputs = formattersFor system;
+            nativeBuildInputs = formatters.${system};
           } ''
           cd ${self}
           ./bin/format check
           touch $out
         '';
-        cabal2nix = (pkgsFor system).runCommandNoCC "cabal2nix-check"
-          {
-            nativeBuildInputs = [ (pkgsFor system).cabal2nix ];
-          } ''
-          cd ${self}
-          diff <(cabal2nix ./.) procex.nix
-          touch $out
-        '';
       });
-      apps = perSystem (system: {
-        regen.type = "app";
-        regen.program = "${regen system}/bin/regen";
-      });
-      packages = perSystem (system: {
-        default = (hsPkgsFor system).procex;
-      });
-      devShells = perSystem (system: {
-        default = (hsPkgsFor system).shellFor {
-          packages = p: [ p.procex ];
-          buildHoogle = true;
-          nativeBuildInputs = with (pkgsFor system); [
-            cabal-install
-            hlint
-            cabal2nix
-            curl
-          ] ++ formattersFor system;
-        };
-        raw = with (pkgsFor system); mkShell {
+      devShells = genAttrs systems (system: {
+        default = with nixpkgs.legacyPackages.${system}; mkShell {
           nativeBuildInputs = [
             cabal-install
-            hlint
-            cabal2nix
-            curl
-            haskell.compiler.ghc941
-          ] ++ formattersFor system;
+            ghc
+            haskell-language-server
+          ] ++ formatters.${system};
         };
       });
     };
